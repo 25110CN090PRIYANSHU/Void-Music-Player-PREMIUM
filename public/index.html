@@ -87,9 +87,6 @@
           </div>
 
           <div class="header-actions">
-            <button id="installAppHeader" class="small-button hidden" title="Install VOID as an app" style="border-color: rgba(245,158,11,0.5); color: #f59e0b; margin-right: 4px; font-weight: 700;">
-              ⤓ Install App
-            </button>
             <button id="themeButton" class="icon-button" title="Toggle theme">
               ◐
             </button>
@@ -503,6 +500,24 @@
           <div><kbd>Q</kbd><span>Open queue</span></div>
           <div><kbd>Esc</kbd><span>Close panel</span></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Bottom App Install Pop-up Banner -->
+    <div id="installBottomPopup" class="install-bottom-popup" aria-hidden="true">
+      <div class="install-popup-icon">
+        <img src="icon-192.png" alt="VOID" />
+      </div>
+      <div class="install-popup-text">
+        <div class="install-popup-title">
+          <span>Install VOID App</span>
+          <span style="font-size: 10px; background: rgba(245,158,11,0.2); color: #f59e0b; padding: 1px 6px; border-radius: 999px;">FREE</span>
+        </div>
+        <div class="install-popup-subtitle">Fast, standalone & zero browser bars</div>
+      </div>
+      <div class="install-popup-actions">
+        <button id="installPopupBtn" class="install-popup-btn">Install</button>
+        <button id="installPopupClose" class="install-popup-close" title="Dismiss">✕</button>
       </div>
     </div>
 

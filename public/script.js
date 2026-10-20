@@ -1913,19 +1913,42 @@ console.log("VOID Music Player 4.0 — Major Update loaded.");
 
 // ==================== PWA INSTALLATION & SERVICE WORKER ====================
 let deferredInstallPrompt = null;
+const isPwaInstalled = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+
+function showInstallPopup() {
+  if (isPwaInstalled || sessionStorage.getItem("void_install_dismissed")) return;
+  const popup = $("installBottomPopup");
+  if (popup) {
+    popup.classList.add("show");
+    popup.setAttribute("aria-hidden", "false");
+  }
+}
+
+function hideInstallPopup() {
+  const popup = $("installBottomPopup");
+  if (popup) {
+    popup.classList.remove("show");
+    popup.setAttribute("aria-hidden", "true");
+  }
+}
+
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredInstallPrompt = e;
   const navBtn = $("installAppNav");
   if (navBtn) navBtn.style.display = "flex";
-  const headerBtn = $("installAppHeader");
-  if (headerBtn) headerBtn.classList.remove("hidden");
+  setTimeout(showInstallPopup, 1200);
 });
+
+// Auto show install popup after brief delay if not dismissed or installed
+if (!isPwaInstalled && !sessionStorage.getItem("void_install_dismissed")) {
+  setTimeout(showInstallPopup, 3000);
+}
 
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
+  hideInstallPopup();
   $("installAppNav")?.style.setProperty("display", "none");
-  $("installAppHeader")?.classList.add("hidden");
   showToast("VOID Music Player installed successfully!");
 });
 
@@ -1934,8 +1957,8 @@ async function triggerPwaInstall() {
     deferredInstallPrompt.prompt();
     const { outcome } = await deferredInstallPrompt.userChoice;
     if (outcome === "accepted") {
+      hideInstallPopup();
       $("installAppNav")?.style.setProperty("display", "none");
-      $("installAppHeader")?.classList.add("hidden");
     }
     deferredInstallPrompt = null;
   } else {
@@ -1949,7 +1972,11 @@ async function triggerPwaInstall() {
 }
 
 $("installAppNav")?.addEventListener("click", triggerPwaInstall);
-$("installAppHeader")?.addEventListener("click", triggerPwaInstall);
+$("installPopupBtn")?.addEventListener("click", triggerPwaInstall);
+$("installPopupClose")?.addEventListener("click", () => {
+  hideInstallPopup();
+  sessionStorage.setItem("void_install_dismissed", "1");
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
