@@ -1,0 +1,1958 @@
+// =====================================================
+// VOID MUSIC PLAYER — MAX EDITION
+// Local library + YouTube IFrame playback
+// =====================================================
+
+const $ = (id) => document.getElementById(id);
+
+const searchInput = $("searchInput"),
+  searchButton = $("searchButton"),
+  searchSuggestions = $("searchSuggestions");
+const resultsContainer = $("results"),
+  loading = $("loading"),
+  errorMessage = $("errorMessage");
+const sectionTitle = $("sectionTitle"),
+  sectionLabel = $("sectionLabel"),
+  resultActions = $("resultActions");
+const exploreButton = $("exploreButton"),
+  themeButton = $("themeButton"),
+  settingsNav = $("settingsNav");
+const mobileMenuButton = $("mobileMenuButton");
+const mobileNavOverlay = $("mobileNavOverlay");
+const mobileSidebar = document.querySelector(".sidebar");
+const playResultsButton = $("playResultsButton"),
+  shuffleResultsButton = $("shuffleResultsButton");
+const playButton = $("playButton"),
+  previousButton = $("previousButton"),
+  nextButton = $("nextButton");
+const shuffleButton = $("shuffleButton"),
+  repeatButton = $("repeatButton"),
+  volume = $("volume"),
+  muteButton = $("muteButton");
+const progress = $("progress"),
+  currentTime = $("currentTime"),
+  duration = $("duration");
+const playerTitle = $("playerTitle"),
+  playerArtist = $("playerArtist"),
+  playerThumbnail = $("playerThumbnail");
+const favoriteButton = $("favoriteButton"),
+  playingIndicator = $("playingIndicator"),
+  nowPlaying = $("nowPlaying");
+const queueOpenButton = $("queueOpenButton"),
+  fullscreenPlayerButton = $("fullscreenPlayerButton"),
+  playerMoreButton = $("playerMoreButton");
+
+const queuePanel = $("queuePanel"),
+  queueOverlay = $("queueOverlay"),
+  closeQueue = $("closeQueue"),
+  queueList = $("queueList"),
+  queueCount = $("queueCount"),
+  clearQueue = $("clearQueue");
+const nowPlayingModal = $("nowPlayingModal"),
+  modalThumbnail = $("modalThumbnail"),
+  modalTitle = $("modalTitle"),
+  modalArtist = $("modalArtist");
+const modalProgress = $("modalProgress"),
+  modalCurrent = $("modalCurrent"),
+  modalDuration = $("modalDuration");
+const modalPlay = $("modalPlay"),
+  modalPrev = $("modalPrev"),
+  modalNext = $("modalNext"),
+  modalShuffle = $("modalShuffle"),
+  modalRepeat = $("modalRepeat");
+const lyricsModal = $("lyricsModal"),
+  lyricsTitle = $("lyricsTitle"),
+  lyricsText = $("lyricsText");
+const contextMenu = $("contextMenu"),
+  toastContainer = $("toastContainer");
+const playlistModal = $("playlistModal"),
+  playlistNameInput = $("playlistNameInput"),
+  savePlaylistButton = $("savePlaylistButton");
+const addToPlaylistModal = $("addToPlaylistModal"),
+  addPlaylistSongTitle = $("addPlaylistSongTitle"),
+  playlistChoices = $("playlistChoices");
+const shortcutsModal = $("shortcutsModal");
+const profileMenu = $("profileMenu"),
+  profileInitial = $("profileInitial"),
+  profileAvatarLarge = $("profileAvatarLarge"),
+  profileName = $("profileName"),
+  profileEmail = $("profileEmail"),
+  avatarInput = $("avatarInput"),
+  logoutButton = $("logoutButton");
+
+async function logout() {
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+  } finally {
+    window.location.href = "/login.html";
+  }
+}
+
+let songs = [];
+let currentIndex = -1;
+let currentSong = null;
+let player = null;
+let playerReady = false;
+let isPlaying = false;
+let isShuffle = false;
+let repeatMode = "off"; // off | all | one
+let isMuted = false;
+let previousVolume = 80;
+let progressTimer = null;
+let endedSongId = null;
+let autoplayWatchdog = null;
+let autoplayTransitioning = false;
+let autoplayGeneration = 0;
+let activePage = "home";
+let activeCollection = "search";
+let activeContextSong = null;
+let queue = load("voidQueue", []);
+let favorites = load("voidFavorites", []);
+let recent = load("voidRecent", []);
+let searchHistory = load("voidSearchHistory", []);
+let playlists = load("voidPlaylists", {});
+let cloudReady = false;
+let cloudSyncTimer = null;
+let currentUser = null;
+let profileData = { bio: "", avatar: "", publicProfile: false };
+let settings = Object.assign(
+  { theme: "dark", autoplayQueue: true, rememberVolume: true },
+  load("voidSettings", {}),
+);
+
+function load(key, fallback) {
+  // Legacy read-only import path. New writes NEVER go to localStorage.
+  try {
+    return JSON.parse(localStorage.getItem(key)) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+function save(key, value) {
+  // MongoDB is the only persistent store. Keep this function so existing
+  // player actions remain simple, but do not write anything to localStorage.
+  if (cloudReady && ["voidFavorites","voidQueue","voidRecent","voidPlaylists","voidSearchHistory","voidSettings"].includes(key)) {
+    scheduleCloudSync();
+  }
+}
+function scheduleCloudSync(){
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer=setTimeout(syncCloudLibrary,350);
+}
+async function syncCloudLibrary(){
+  if(!cloudReady) return;
+  try{
+    await fetch("/api/library",{
+      method:"PUT",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        library:{
+          favorites, queue, recent, playlists, searchHistory, settings,
+          profile: profileData,
+          lastPlayed: currentSong ? {...normalizeSong(currentSong),savedAt:Date.now()} : null
+        }
+      })
+    });
+  }catch(e){ console.warn("VOID MongoDB sync failed",e); }
+}
+function clearLegacyBrowserData() {
+  [
+    "voidFavorites","voidQueue","voidRecent","voidPlaylists","voidSearchHistory",
+    "voidSettings","voidVolume","voidUser"
+  ].forEach(k => localStorage.removeItem(k));
+  if (currentUser?.id) localStorage.removeItem(`voidProfileImage:${currentUser.id}`);
+}
+async function loadCloudLibrary(){
+  try{
+    const r=await fetch("/api/library"); if(!r.ok) return;
+    const d=await r.json(); const c=d.library||{};
+
+    // One-time migration for users of the old localStorage build.
+    const legacy = {
+      favorites: load("voidFavorites", []),
+      queue: load("voidQueue", []),
+      recent: load("voidRecent", []),
+      playlists: load("voidPlaylists", {}),
+      searchHistory: load("voidSearchHistory", []),
+      settings: load("voidSettings", {}),
+      profile: {
+        ...profileData,
+        avatar: currentUser?.id
+          ? (localStorage.getItem(`voidProfileImage:${currentUser.id}`) || "")
+          : ""
+      }
+    };
+    const cloudHas = Boolean(
+      c.favorites?.length ||
+      c.queue?.length ||
+      c.recent?.length ||
+      Object.keys(c.playlists || {}).length ||
+      c.searchHistory?.length ||
+      c.lastPlayed ||
+      c.profile?.avatar ||
+      c.profile?.bio
+    );
+    const legacyHas = Boolean(
+      legacy.favorites.length ||
+      legacy.queue.length ||
+      legacy.recent.length ||
+      Object.keys(legacy.playlists).length ||
+      legacy.searchHistory.length ||
+      Object.keys(legacy.settings || {}).length > 0 ||
+      legacy.profile.avatar
+    );
+
+    if(!cloudHas && legacyHas){
+      favorites=legacy.favorites;
+      queue=legacy.queue;
+      recent=legacy.recent;
+      playlists=legacy.playlists;
+      searchHistory=legacy.searchHistory;
+      settings=Object.assign(settings, legacy.settings || {});
+      profileData=Object.assign(profileData, legacy.profile || {});
+      cloudReady=true;
+      await syncCloudLibrary();
+      clearLegacyBrowserData();
+      return;
+    }
+
+    favorites=Array.isArray(c.favorites)?c.favorites:[];
+    queue=Array.isArray(c.queue)?c.queue:[];
+    recent=Array.isArray(c.recent)?c.recent:[];
+    playlists=c.playlists&&typeof c.playlists==='object'?c.playlists:{};
+    searchHistory=Array.isArray(c.searchHistory)?c.searchHistory:[];
+    settings=Object.assign(settings,c.settings||{});
+    profileData=Object.assign(profileData,c.profile||{});
+    cloudReady=true;
+    clearLegacyBrowserData();
+    updateBadges(); renderQueue(); renderFavorites(); renderRecent(); renderQueuePage(); renderPlaylists(); initSettings();
+  }catch(e){ console.warn("VOID MongoDB library unavailable",e); cloudReady=true; }
+}
+
+function userInitial(name = "P") {
+  return name.trim().split(/\s+/)[0]?.charAt(0).toUpperCase() || "P";
+}
+function updateProfileUI(user, profile = profileData) {
+  if (!user) return;
+  const initial = userInitial(user.name || user.email);
+  profileInitial.textContent = initial;
+  profileAvatarLarge.textContent = initial;
+  profileName.textContent = user.name || user.email.split("@")[0];
+  profileEmail.textContent = user.email;
+  const image = profile?.avatar || "";
+  [profileInitial, profileAvatarLarge].forEach((el) => {
+    el.style.backgroundImage = image ? `url("${image}")` : "";
+    el.classList.toggle("has-image", Boolean(image));
+  });
+}
+async function loadProfile() {
+  try {
+    const response = await fetch("/api/auth/me");
+    if (!response.ok) return;
+    const data = await response.json();
+    currentUser = data.user;
+    updateProfileUI(currentUser);
+    await loadCloudLibrary();
+    updateProfileUI(currentUser, profileData);
+    registerDevice();
+  } catch {
+    console.warn("VOID profile could not be loaded");
+  }
+}
+function escapeHTML(v) {
+  const d = document.createElement("div");
+  d.textContent = v ?? "";
+  return d.innerHTML;
+}
+function cleanTitle(t = "") {
+  return t
+    .replace(/\s*\([^)]*(official|video|audio|lyrics|lyric)[^)]*\)/gi, "")
+    .replace(/\s*\[[^\]]*(official|video|audio|lyrics|lyric)[^\]]*\]/gi, "")
+    .trim();
+}
+function formatTime(sec) {
+  sec = Math.floor(sec || 0);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+function showToast(message) {
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = message;
+  toastContainer.appendChild(el);
+  setTimeout(() => {
+    el.classList.add("out");
+    setTimeout(() => el.remove(), 250);
+  }, 2200);
+}
+function showError(message) {
+  errorMessage.textContent = message;
+  errorMessage.classList.remove("hidden");
+}
+function hideError() {
+  errorMessage.classList.add("hidden");
+}
+function showLoading(v) {
+  loading.classList.toggle("hidden", !v);
+}
+function persistAll() {
+  save("voidFavorites", favorites);
+  save("voidQueue", queue);
+  save("voidRecent", recent);
+  save("voidPlaylists", playlists);
+  save("voidSettings", settings);
+}
+
+function songKey(song) {
+  return song?.id || "";
+}
+function isFavorite(song) {
+  return !!song && favorites.some((x) => x.id === song.id);
+}
+function addFavorite(song) {
+  if (!song?.id) return;
+  if (!isFavorite(song)) {
+    favorites.unshift(normalizeSong(song));
+    save("voidFavorites", favorites);
+    showToast("Added to Favorites ♥");
+  }
+  updateFavoriteButton();
+  updateBadges();
+  renderFavoritesIfOpen();
+}
+function removeFavorite(song) {
+  favorites = favorites.filter((x) => x.id !== song.id);
+  save("voidFavorites", favorites);
+  updateFavoriteButton();
+  updateBadges();
+  renderFavoritesIfOpen();
+  showToast("Removed from Favorites");
+}
+function toggleFavorite(song) {
+  isFavorite(song) ? removeFavorite(song) : addFavorite(song);
+}
+
+function normalizeSong(song) {
+  return {
+    id: song.id,
+    title: song.title || "Unknown title",
+    channel: song.channel || "YouTube",
+    thumbnail:
+      song.thumbnail || `https://i.ytimg.com/vi/${song.id}/hqdefault.jpg`,
+    publishedAt: song.publishedAt || "",
+  };
+}
+
+function addToQueue(song) {
+  if (!song?.id) return;
+  if (queue.some((x) => x.id === song.id)) {
+    showToast("Already in queue");
+    return;
+  }
+  queue.push(normalizeSong(song));
+  save("voidQueue", queue);
+  renderQueue();
+  updateBadges();
+  showToast("Added to queue");
+}
+function removeQueueAt(i) {
+  if (i < 0 || i >= queue.length) return;
+  queue.splice(i, 1);
+  save("voidQueue", queue);
+  renderQueue();
+  updateBadges();
+  showToast("Removed from queue");
+}
+function moveQueue(i, j) {
+  if (j < 0 || j >= queue.length) return;
+  const [x] = queue.splice(i, 1);
+  queue.splice(j, 0, x);
+  save("voidQueue", queue);
+  renderQueue();
+}
+function clearQueueAll() {
+  queue = [];
+  save("voidQueue", queue);
+  renderQueue();
+  updateBadges();
+  showToast("Queue cleared");
+}
+
+function addRecent(song) {
+  if (!song?.id) return;
+  recent = recent.filter((x) => x.id !== song.id);
+  recent.unshift({ ...normalizeSong(song), playedAt: Date.now() });
+  recent = recent.slice(0, 50);
+  save("voidRecent", recent);
+  if (activePage === "recent") renderRecent();
+}
+
+function createPlaylist(name) {
+  const clean = name.trim();
+  if (!clean) return;
+  if (playlists[clean]) {
+    showToast("A playlist with that name already exists");
+    return;
+  }
+  playlists[clean] = [];
+  save("voidPlaylists", playlists);
+  closeAllModals();
+  renderPlaylists();
+  showToast(`Created "${clean}"`);
+}
+function addSongToPlaylist(name, song) {
+  if (!playlists[name]) return;
+  if (playlists[name].some((x) => x.id === song.id)) {
+    showToast("Song already in playlist");
+    return;
+  }
+  playlists[name].push(normalizeSong(song));
+  save("voidPlaylists", playlists);
+  closeAllModals();
+  renderPlaylists();
+  showToast(`Added to ${name}`);
+}
+function deletePlaylist(name) {
+  delete playlists[name];
+  save("voidPlaylists", playlists);
+  renderPlaylists();
+  showToast("Playlist deleted");
+}
+function playCollection(collection, index = 0, shuffle = false) {
+  if (!collection?.length) {
+    showToast("Nothing to play");
+    return;
+  }
+  activeCollection = "custom";
+  currentIndex = shuffle
+    ? Math.floor(Math.random() * collection.length)
+    : index;
+  const song = collection[currentIndex];
+  songs = [...collection];
+  playSong(currentIndex);
+}
+
+window.onYouTubeIframeAPIReady = function () {
+  player = new YT.Player("youtubePlayer", {
+    height: "1",
+    width: "1",
+    videoId: "",
+    playerVars: {
+      autoplay: 0,
+      controls: 0,
+      disablekb: 1,
+      modestbranding: 1,
+      rel: 0,
+    },
+    events: {
+      onReady: handlePlayerReady,
+      onStateChange: handlePlayerState,
+      onError: handlePlayerError,
+    },
+  });
+};
+function handlePlayerReady(event) {
+  playerReady = true;
+  const saved = settings.rememberVolume
+    ? Number(settings.volume ?? 80)
+    : 80;
+  volume.value = saved;
+  previousVolume = saved;
+  event.target.setVolume(saved);
+  updateMuteIcon();
+  startAutoplayWatchdog();
+}
+function ensureVideoPlaying(videoId) {
+  // A browser may leave a video in the CUED state after loadVideoById()
+  // finishes from an ENDED event. Retry only for the expected new video.
+  [100, 500, 1200].forEach((delay) => {
+    setTimeout(() => {
+      if (!playerReady || !currentSong || currentSong.id !== videoId) return;
+      const state =
+        typeof player.getPlayerState === "function"
+          ? player.getPlayerState()
+          : null;
+      if (state !== YT.PlayerState.PLAYING && state !== YT.PlayerState.BUFFERING)
+        player.playVideo();
+    }, delay);
+  });
+}
+function autoPlayNextSong(reason = "ended") {
+  if (!currentSong || autoplayTransitioning) return;
+
+  const finishedId = currentSong.id;
+  autoplayTransitioning = true;
+  endedSongId = finishedId;
+  autoplayGeneration++;
+  const generation = autoplayGeneration;
+
+  const advance = () => {
+    // Make sure an old timer/event cannot advance twice after the user
+    // manually selected another song.
+    if (generation !== autoplayGeneration || currentSong?.id !== finishedId) {
+      autoplayTransitioning = false;
+      return;
+    }
+
+    if (repeatMode === "one") {
+      autoplayTransitioning = false;
+      playCurrent(true);
+      return;
+    }
+
+    let next = -1;
+
+    // If the current song belongs to the queue, continue with the next queue item.
+    if (settings.autoplayQueue && queue.length) {
+      const qIndex = queue.findIndex((x) => x.id === finishedId);
+      if (qIndex >= 0 && qIndex + 1 < queue.length) next = qIndex + 1;
+    }
+
+    if (next >= 0) {
+      autoplayTransitioning = false;
+      playQueueSong(next, true);
+      return;
+    }
+
+    // Normal autoplay: always move to the next song in the active collection.
+    if (songs.length > 1) {
+      const nextIndex = isShuffle
+        ? (() => {
+            let n = Math.floor(Math.random() * songs.length);
+            while (n === currentIndex && songs.length > 1) {
+              n = Math.floor(Math.random() * songs.length);
+            }
+            return n;
+          })()
+        : (currentIndex + 1) % songs.length;
+
+      autoplayTransitioning = false;
+      playSong(nextIndex, true);
+      return;
+    }
+
+    autoplayTransitioning = false;
+  };
+
+  // Give the YouTube iframe a moment to finish its ENDED transition before
+  // loading another video. This is more reliable than immediately calling
+  // loadVideoById() from inside the ENDED callback on mobile browsers.
+  setTimeout(advance, reason === "youtube-ended" ? 80 : 0);
+}
+
+function startAutoplayWatchdog() {
+  clearInterval(autoplayWatchdog);
+  autoplayWatchdog = setInterval(() => {
+    if (!playerReady || !currentSong || autoplayTransitioning) return;
+
+    try {
+      const state = player.getPlayerState();
+      const total = Number(player.getDuration()) || 0;
+      const time = Number(player.getCurrentTime()) || 0;
+
+      // Primary fallback: YouTube says the video has ended.
+      if (state === YT.PlayerState.ENDED) {
+        autoPlayNextSong("watchdog-ended");
+        return;
+      }
+
+      // Secondary fallback: some iframe versions briefly stay PLAYING/BUFFERING
+      // at the final timestamp without emitting ENDED.
+      if (
+        total > 2 &&
+        time >= total - 0.25 &&
+        (state === YT.PlayerState.PLAYING || state === YT.PlayerState.BUFFERING)
+      ) {
+        autoPlayNextSong("watchdog-time");
+      }
+    } catch {}
+  }, 100);
+}
+
+function handlePlayerState(event) {
+  if (!window.YT) return;
+  switch (event.data) {
+    case YT.PlayerState.PLAYING:
+      endedSongId = null;
+      setPlayingUI(true);
+      startProgressUpdater();
+      break;
+    case YT.PlayerState.BUFFERING:
+      // Keep the clock alive while YouTube is buffering; the API can expose
+      // advancing time before it sends PLAYING again.
+      startProgressUpdater();
+      break;
+    case YT.PlayerState.PAUSED:
+      setPlayingUI(false);
+      stopProgressUpdater();
+      break;
+    case YT.PlayerState.ENDED:
+      setPlayingUI(false);
+      stopProgressUpdater();
+      progress.value = 0;
+      modalProgress.value = 0;
+      currentTime.textContent = "0:00";
+      modalCurrent.textContent = "0:00";
+      const endedVideoId = event.target?.getVideoData?.()?.video_id;
+      if (endedVideoId && endedVideoId !== currentSong?.id) break;
+      autoPlayNextSong("youtube-ended");
+      break;
+  }
+}
+function setPlayingUI(playing) {
+  isPlaying = playing;
+  playButton.textContent = playing ? "❚❚" : "▶";
+  modalPlay.textContent = playing ? "❚❚" : "▶";
+  nowPlaying.classList.toggle("playing", playing);
+  [modalShuffle, shuffleButton].forEach((b) =>
+    b.classList.toggle("active", isShuffle),
+  );
+  [modalRepeat, repeatButton].forEach((b) =>
+    b.classList.toggle("active", repeatMode !== "off"),
+  );
+  updateMediaSession();
+}
+
+function updateMediaSession() {
+  if (!("mediaSession" in navigator) || !currentSong) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: cleanTitle(currentSong.title),
+      artist: currentSong.channel || "VOID Music Player",
+      album: "VOID",
+      artwork: currentSong.thumbnail
+        ? [
+            { src: currentSong.thumbnail, sizes: "96x96", type: "image/jpeg" },
+            { src: currentSong.thumbnail, sizes: "256x256", type: "image/jpeg" },
+            { src: currentSong.thumbnail, sizes: "512x512", type: "image/jpeg" },
+          ]
+        : [],
+    });
+    navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+  } catch (error) {
+    console.debug("Media Session metadata unavailable:", error);
+  }
+}
+
+function setupMediaSession() {
+  if (!("mediaSession" in navigator)) return;
+  const actions = {
+    play: () => playerReady && player?.playVideo(),
+    pause: () => playerReady && player?.pauseVideo(),
+    nexttrack: () => nextSong(true),
+    previoustrack: () => previousSong(),
+    seekbackward: () => {
+      if (playerReady) player.seekTo(Math.max(0, player.getCurrentTime() - 10), true);
+    },
+    seekforward: () => {
+      if (playerReady) player.seekTo(player.getCurrentTime() + 10, true);
+    },
+  };
+  Object.entries(actions).forEach(([action, handler]) => {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch {}
+  });
+}
+
+function handlePlayerError(event) {
+  const code = Number(event?.data);
+  console.error("YouTube player error:", code);
+  stopProgressUpdater();
+
+  // YouTube errors 101/150 mean embedding is not allowed for the video;
+  // 100 means the video is unavailable. Skip these automatically when there
+  // is another song in the active collection instead of leaving autoplay
+  // stuck on a broken result.
+  const skippable = code === 100 || code === 101 || code === 150;
+  if (skippable && currentSong && songs.length > 1) {
+    showToast("This video cannot be played — skipping to the next song.");
+    autoplayGeneration++;
+    autoplayTransitioning = false;
+    setPlayingUI(false);
+    const nextIndex = isShuffle
+      ? (() => {
+          let n = Math.floor(Math.random() * songs.length);
+          while (n === currentIndex && songs.length > 1) n = Math.floor(Math.random() * songs.length);
+          return n;
+        })()
+      : (currentIndex + 1) % songs.length;
+    setTimeout(() => playSong(nextIndex, true), 120);
+    return;
+  }
+
+  showError("This video cannot be played. Try another result.");
+  setPlayingUI(false);
+}
+
+let infiniteScrollPage = 1;
+let isInfiniteLoading = false;
+let hasMoreInfiniteSongs = true;
+let currentInfiniteQuery = "";
+
+async function loadDiscoverFeed() {
+  showLoading(true);
+  hideError();
+  infiniteScrollPage = 1;
+  isInfiniteLoading = false;
+  hasMoreInfiniteSongs = true;
+  currentInfiniteQuery = "";
+  try {
+    const r = await fetch("/api/discover?page=1");
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Discover feed failed");
+    songs = Array.isArray(data.results) ? data.results : Array.isArray(data.songs) ? data.songs : [];
+    activeCollection = "discover";
+    currentIndex = -1;
+    sectionLabel.textContent = "MADE FOR YOU • INDIA";
+    sectionTitle.textContent = "Your Discover Feed";
+    const reason = $("discoverReason");
+    if (reason) reason.textContent = data.reason || "Indian music first — VOID learns your taste as you listen.";
+    resultActions.classList.toggle("hidden", !songs.length);
+    renderSongs();
+  } catch (e) {
+    console.error(e);
+    const reason = $("discoverReason");
+    if (reason) reason.textContent = "Indian music first — play a few songs and VOID will personalize this feed.";
+    showError(e.message || "Could not load your discover feed");
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function searchSongs() {
+  const query = searchInput.value.trim();
+  if (!query) {
+    searchInput.focus();
+    return;
+  }
+  showLoading(true);
+  hideError();
+  infiniteScrollPage = 1;
+  isInfiniteLoading = false;
+  hasMoreInfiniteSongs = true;
+  currentInfiniteQuery = query;
+  resultsContainer.innerHTML = "";
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(query)}&page=1`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Search failed");
+    searchHistory = [
+      query,
+      ...searchHistory.filter((item) => item.toLowerCase() !== query.toLowerCase()),
+    ].slice(0, 8);
+    save("voidSearchHistory", searchHistory);
+    songs = data.results || [];
+    activeCollection = "search";
+    currentIndex = -1;
+    sectionLabel.textContent = "SEARCH RESULTS";
+    sectionTitle.textContent = `Results for "${query}"`;
+    const discoverReason = $("discoverReason");
+    if (discoverReason) discoverReason.textContent = "Search results — use Home to return to your personalized Indian feed.";
+    resultActions.classList.toggle("hidden", !songs.length);
+    renderSongs();
+    showPage("home");
+  } catch (e) {
+    console.error(e);
+    showError(e.message || "Something went wrong");
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function loadMoreInfiniteSongs() {
+  if (isInfiniteLoading || !hasMoreInfiniteSongs) return;
+  if (currentPage !== "home") return;
+  if (activeCollection !== "discover" && activeCollection !== "search") return;
+
+  isInfiniteLoading = true;
+  const nextPage = infiniteScrollPage + 1;
+
+  let loaderEl = $("infiniteScrollLoader");
+  if (!loaderEl) {
+    loaderEl = document.createElement("div");
+    loaderEl.id = "infiniteScrollLoader";
+    loaderEl.className = "infinite-scroll-loader";
+    loaderEl.innerHTML = `<div class="infinite-spinner"></div><span>Loading more music...</span>`;
+    resultsContainer.parentNode.appendChild(loaderEl);
+  } else {
+    loaderEl.classList.remove("hidden");
+  }
+
+  try {
+    let url;
+    if (activeCollection === "search" && currentInfiniteQuery) {
+      url = `/api/search?q=${encodeURIComponent(currentInfiniteQuery)}&page=${nextPage}`;
+    } else {
+      url = `/api/discover?page=${nextPage}`;
+    }
+
+    const r = await fetch(url);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Load more failed");
+
+    const incoming = Array.isArray(data.results) ? data.results : Array.isArray(data.songs) ? data.songs : [];
+    if (!incoming.length) {
+      hasMoreInfiniteSongs = false;
+      if (loaderEl) loaderEl.classList.add("hidden");
+      return;
+    }
+
+    const existingIds = new Set(songs.map((s) => s.id));
+    const freshSongs = incoming.filter((s) => s && s.id && !existingIds.has(s.id));
+    if (!freshSongs.length) {
+      hasMoreInfiniteSongs = false;
+      if (loaderEl) loaderEl.classList.add("hidden");
+      return;
+    }
+
+    const startIdx = songs.length;
+    freshSongs.forEach((song, i) => {
+      songs.push(song);
+      resultsContainer.appendChild(createSongCard(song, startIdx + i));
+    });
+
+    infiniteScrollPage = nextPage;
+  } catch (e) {
+    console.warn("Infinite scroll load error:", e);
+  } finally {
+    isInfiniteLoading = false;
+    const loaderEl = $("infiniteScrollLoader");
+    if (loaderEl) loaderEl.classList.add("hidden");
+  }
+}
+
+window.addEventListener("scroll", () => {
+  if (isInfiniteLoading || !hasMoreInfiniteSongs) return;
+  if (currentPage !== "home") return;
+  if (activeCollection !== "discover" && activeCollection !== "search") return;
+
+  const scrollHeight = document.documentElement.scrollHeight;
+  const currentScroll = window.innerHeight + window.scrollY;
+  if (currentScroll >= scrollHeight - 650) {
+    loadMoreInfiniteSongs();
+  }
+}, { passive: true });
+function renderSongs() {
+  resultsContainer.innerHTML = "";
+  if (!songs.length) {
+    resultsContainer.innerHTML = `<div class="empty-state"><div class="empty-icon">⌕</div><h3>No songs found</h3><p>Try another artist, song or album.</p></div>`;
+    return;
+  }
+  songs.forEach((song, index) =>
+    resultsContainer.appendChild(createSongCard(song, index)),
+  );
+}
+function createSongCard(song, index) {
+  const card = document.createElement("article");
+  card.className = "song-card";
+  card.innerHTML = `<img class="song-thumbnail" src="${escapeHTML(song.thumbnail)}" alt="">
+      <div class="card-actions">
+        <button class="card-action favorite-card-action ${isFavorite(song) ? "favorited" : ""}" title="Favorite">${isFavorite(song) ? "♥" : "♡"}</button>
+        <button class="card-action queue-card-action" title="Add to queue">＋</button>
+        <button class="card-action playlist-card-action" title="Add to playlist">▣</button>
+      </div>
+      <div class="song-info"><div class="song-title">${escapeHTML(cleanTitle(song.title))}</div><span class="song-channel">${escapeHTML(song.channel)}</span></div>`;
+  card.addEventListener("click", () => playSong(index));
+  card.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openContextMenu(song, e.clientX, e.clientY);
+  });
+  card.querySelector(".favorite-card-action").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFavorite(song);
+    renderSongs();
+  });
+  card.querySelector(".queue-card-action").addEventListener("click", (e) => {
+    e.stopPropagation();
+    addToQueue(song);
+  });
+  card.querySelector(".playlist-card-action").addEventListener("click", (e) => {
+    e.stopPropagation();
+    openAddToPlaylist(song);
+  });
+  return card;
+}
+
+function playSong(index, ensurePlayback = false) {
+  if (index < 0 || index >= songs.length) return;
+  if (!playerReady) {
+    showError("YouTube player is still loading. Please try again.");
+    return;
+  }
+  currentIndex = index;
+  autoplayGeneration++;
+  autoplayTransitioning = false;
+  currentSong = normalizeSong(songs[index]);
+  updateMediaSession();
+  playerTitle.textContent = cleanTitle(currentSong.title);
+  playerArtist.textContent = currentSong.channel;
+  playerThumbnail.src = currentSong.thumbnail;
+  modalTitle.textContent = cleanTitle(currentSong.title);
+  modalArtist.textContent = currentSong.channel;
+  modalThumbnail.src = currentSong.thumbnail;
+  progress.value = 0;
+  modalProgress.value = 0;
+  setRangeProgress(progress, 0);
+  setRangeProgress(modalProgress, 0);
+  currentTime.textContent = "0:00";
+  modalCurrent.textContent = "0:00";
+  duration.textContent = "0:00";
+  modalDuration.textContent = "0:00";
+  endedSongId = null;
+  updateFavoriteButton();
+  addRecent(currentSong);
+  player.loadVideoById(currentSong.id);
+  // Explicitly resume playback after switching videos. The short delay avoids
+  // racing YouTube's ENDED -> CUED transition on mobile browsers.
+  setTimeout(() => {
+    if (!currentSong || currentSong.id !== songs[index]?.id || !playerReady) return;
+    try { player.playVideo(); } catch {}
+  }, ensurePlayback ? 120 : 0);
+  setPlayingUI(true);
+  // YouTube may emit PLAYING before duration metadata is available.
+  startProgressUpdater();
+  if (ensurePlayback) ensureVideoPlaying(currentSong.id);
+}
+function playCurrent(ensurePlayback = false) {
+  if (currentIndex === -1) {
+    if (songs.length) playSong(0);
+    return;
+  }
+  if (playerReady && currentSong) {
+    endedSongId = null;
+    player.loadVideoById(currentSong.id);
+    player.playVideo();
+    if (ensurePlayback) ensureVideoPlaying(currentSong.id);
+  }
+}
+function nextSong(ensurePlayback = false) {
+  if (!songs.length) return;
+  let next;
+  if (isShuffle) next = Math.floor(Math.random() * songs.length);
+  else next = (currentIndex + 1) % songs.length;
+  if (songs.length > 1 && next === currentIndex)
+    next = (next + 1) % songs.length;
+  playSong(next, ensurePlayback);
+}
+function previousSong() {
+  if (!songs.length) return;
+  if (playerReady && player.getCurrentTime() > 3) {
+    player.seekTo(0, true);
+    return;
+  }
+  let prev = (currentIndex - 1 + songs.length) % songs.length;
+  playSong(prev);
+}
+function playQueueSong(index, ensurePlayback = false) {
+  if (index < 0 || index >= queue.length) return;
+  const target = queue[index];
+  const existing = songs.findIndex((x) => x.id === target.id);
+  if (existing >= 0) {
+    playSong(existing, ensurePlayback);
+    return;
+  }
+  songs = [target];
+  activeCollection = "queue";
+  currentIndex = 0;
+  playSong(0, ensurePlayback);
+}
+function nextFromQueue() {
+  if (!queue.length) {
+    nextSong();
+    return;
+  }
+  const idx = queue.findIndex((x) => x.id === currentSong?.id);
+  if (idx >= 0 && idx + 1 < queue.length) {
+    playQueueSong(idx + 1);
+    return;
+  }
+  playQueueSong(0);
+}
+
+setupMediaSession();
+
+// Do not pause playback when the player page is minimized/backgrounded.
+// The YouTube iframe remains the actual audio source. Media Session gives
+// supported mobile browsers lock-screen/headset controls.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && isPlaying) updateMediaSession();
+});
+
+window.addEventListener("pagehide", () => {
+  if (isPlaying) updateMediaSession();
+});
+
+playButton.addEventListener("click", () => {
+  if (!playerReady) return;
+  if (currentIndex === -1) {
+    if (songs.length) playSong(0);
+    return;
+  }
+  isPlaying ? player.pauseVideo() : player.playVideo();
+});
+nextButton.addEventListener("click", nextSong);
+previousButton.addEventListener("click", previousSong);
+shuffleButton.addEventListener("click", toggleShuffle);
+repeatButton.addEventListener("click", cycleRepeat);
+modalPlay.addEventListener("click", () => playButton.click());
+modalNext.addEventListener("click", nextSong);
+modalPrev.addEventListener("click", previousSong);
+modalShuffle.addEventListener("click", toggleShuffle);
+modalRepeat.addEventListener("click", cycleRepeat);
+function toggleShuffle() {
+  isShuffle = !isShuffle;
+  setPlayingUI(isPlaying);
+  showToast(isShuffle ? "Shuffle on" : "Shuffle off");
+}
+function cycleRepeat() {
+  repeatMode =
+    repeatMode === "off" ? "all" : repeatMode === "all" ? "one" : "off";
+  repeatButton.title = `Repeat: ${repeatMode}`;
+  showToast(`Repeat ${repeatMode}`);
+  setPlayingUI(isPlaying);
+}
+
+favoriteButton.addEventListener(
+  "click",
+  () => currentSong && toggleFavorite(currentSong),
+);
+volume.addEventListener("input", () => {
+  const v = Number(volume.value);
+  if (v > 0) previousVolume = v;
+  if (playerReady) {
+    player.unMute();
+    player.setVolume(v);
+  }
+  isMuted = v === 0;
+  if (settings.rememberVolume) {
+    settings.volume = v;
+    save("voidSettings", settings);
+}
+  updateMuteIcon();
+});
+muteButton.addEventListener("click", () => {
+  if (!playerReady) return;
+  if (isMuted || Number(volume.value) === 0) {
+    const v = previousVolume || 80;
+    volume.value = v;
+    player.unMute();
+    player.setVolume(v);
+    isMuted = false;
+  } else {
+    previousVolume = Number(volume.value) || 80;
+    volume.value = 0;
+    player.mute();
+    isMuted = true;
+  }
+  updateMuteIcon();
+});
+function updateMuteIcon() {
+  const v = Number(volume.value);
+  muteButton.textContent = isMuted || v === 0 ? "🔇" : v < 50 ? "🔉" : "🔊";
+  muteButton.title = isMuted ? "Unmute" : "Mute";
+}
+function changeVolume(amount) {
+  let v = Math.max(0, Math.min(100, Number(volume.value) + amount));
+  volume.value = v;
+  if (playerReady) {
+    player.unMute();
+    player.setVolume(v);
+  }
+  isMuted = v === 0;
+  if (v > 0) previousVolume = v;
+  if (settings.rememberVolume) {
+    settings.volume = v;
+    save("voidSettings", settings);
+}
+  updateMuteIcon();
+}
+
+function startProgressUpdater() {
+  stopProgressUpdater();
+  updateProgress();
+  progressTimer = setInterval(updateProgress, 400);
+}
+function stopProgressUpdater() {
+  if (progressTimer) {
+    clearInterval(progressTimer);
+    progressTimer = null;
+  }
+}
+function updateProgress() {
+  if (!playerReady || !currentSong) return;
+  let total = 0;
+  let cur = 0;
+  try {
+    total = Number(player.getDuration()) || 0;
+    cur = Number(player.getCurrentTime()) || 0;
+  } catch {
+    return;
+  }
+  if (!total || !Number.isFinite(total)) return;
+  const pct = Math.min(100, Math.max(0, (cur / total) * 100));
+  progress.value = pct;
+
+  modalProgress.value = pct;
+  setRangeProgress(progress, pct);
+  setRangeProgress(modalProgress, pct);
+  currentTime.textContent = formatTime(cur);
+  duration.textContent = formatTime(total);
+  modalCurrent.textContent = formatTime(cur);
+  modalDuration.textContent = formatTime(total);
+  // Keep autoplay working if a browser misses the IFrame API ENDED event.
+  if (
+    cur >= total - 0.5 &&
+    typeof player.getPlayerState === "function" &&
+    player.getPlayerState() === YT.PlayerState.ENDED
+  ) {
+    handlePlayerState({ data: YT.PlayerState.ENDED });
+  }
+}
+function setRangeProgress(range, pct) {
+  if (!range) return;
+  const active =
+    getComputedStyle(document.body).getPropertyValue("--text").trim() || "#fff";
+  range.style.background = `linear-gradient(to right, ${active} 0%, ${active} ${pct}%, #333 ${pct}%, #333 100%)`;
+}
+function seekFromRange(value) {
+  if (!playerReady || currentIndex === -1) return;
+  const total = player.getDuration();
+  if (total) player.seekTo((Number(value) / 100) * total, true);
+}
+progress.addEventListener("input", () => {
+  if (playerReady && currentIndex !== -1) {
+    const total = player.getDuration();
+    if (total) {
+      const t = (Number(progress.value) / 100) * total;
+      currentTime.textContent = formatTime(t);
+      setRangeProgress(progress, Number(progress.value));
+    }
+  }
+});
+progress.addEventListener("change", () => seekFromRange(progress.value));
+modalProgress.addEventListener("input", () => {
+  modalProgress.value = progress.value;
+  progress.value = modalProgress.value;
+  setRangeProgress(progress, Number(progress.value));
+  setRangeProgress(modalProgress, Number(modalProgress.value));
+  const total = playerReady ? player.getDuration() : 0;
+  if (total)
+    modalCurrent.textContent = formatTime(
+      (Number(modalProgress.value) / 100) * total,
+    );
+});
+modalProgress.addEventListener("change", () =>
+  seekFromRange(modalProgress.value),
+);
+
+function updateFavoriteButton() {
+  const yes = currentSong && isFavorite(currentSong);
+  favoriteButton.textContent = yes ? "♥" : "♡";
+  favoriteButton.classList.toggle("favorited", yes);
+  favoriteButton.title = yes ? "Remove from Favorites" : "Add to Favorites";
+}
+function updateBadges() {
+  $("favoriteBadge").textContent = favorites.length;
+  $("queueBadge").textContent = queue.length;
+  queueCount.textContent = `${queue.length} ${queue.length === 1 ? "song" : "songs"}`;
+}
+
+function renderQueue() {
+  updateBadges();
+  queueList.innerHTML = "";
+  if (!queue.length) {
+    queueList.innerHTML = `<div class="empty-state"><div class="empty-icon">♫</div><h3>Queue is empty</h3><p>Add songs from search results or the player.</p></div>`;
+    return;
+  }
+  queue.forEach((song, i) => {
+    const row = document.createElement("div");
+    row.className =
+      "queue-row" + (song.id === currentSong?.id ? " current" : "");
+    row.innerHTML = `<span class="queue-number">${i + 1}</span><img src="${escapeHTML(song.thumbnail)}" alt=""><div class="q-info"><div class="q-title">${escapeHTML(cleanTitle(song.title))}</div><div class="q-sub">${escapeHTML(song.channel)}</div></div><div class="q-actions"><button class="q-action" title="Up">↑</button><button class="q-action" title="Down">↓</button><button class="q-action" title="Remove">×</button></div>`;
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".q-action")) return;
+      playQueueSong(i);
+    });
+    row.querySelectorAll(".q-action")[0].addEventListener("click", (e) => {
+      e.stopPropagation();
+      moveQueue(i, i - 1);
+    });
+    row.querySelectorAll(".q-action")[1].addEventListener("click", (e) => {
+      e.stopPropagation();
+      moveQueue(i, i + 1);
+    });
+    row.querySelectorAll(".q-action")[2].addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeQueueAt(i);
+    });
+    queueList.appendChild(row);
+  });
+}
+function openQueue() {
+  renderQueue();
+  queuePanel.classList.add("open");
+  queueOverlay.classList.add("open");
+}
+function closeQueuePanel() {
+  queuePanel.classList.remove("open");
+  queueOverlay.classList.remove("open");
+}
+queueOpenButton.addEventListener("click", openQueue);
+closeQueue.addEventListener("click", closeQueuePanel);
+queueOverlay.addEventListener("click", closeQueuePanel);
+clearQueue.addEventListener("click", clearQueueAll);
+
+function renderLibraryList(
+  container,
+  items,
+  emptyTitle,
+  emptyText,
+  emptyIcon = "♡",
+  allowRemove = true,
+) {
+  container.innerHTML = "";
+  if (!items.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emptyIcon}</div><h3>${emptyTitle}</h3><p>${emptyText}</p></div>`;
+    return;
+  }
+  items.forEach((song, i) => {
+    const row = document.createElement("div");
+    row.className = "library-row";
+    row.innerHTML = `<span class="row-number">${i + 1}</span><img class="row-thumb" src="${escapeHTML(song.thumbnail)}" alt=""><div class="row-main"><div class="row-title">${escapeHTML(cleanTitle(song.title))}</div><div class="row-sub">${escapeHTML(song.channel)}</div></div><div class="row-actions"><button class="row-action play-row" title="Play">▶</button><button class="row-action queue-row-btn" title="Queue">＋</button><button class="row-action playlist-row-btn" title="Add to playlist">▣</button>${allowRemove ? '<button class="row-action remove-row" title="Remove">×</button>' : ""}</div>`;
+    row
+      .querySelector(".play-row")
+      .addEventListener("click", () => playCollection(items, i));
+    row
+      .querySelector(".queue-row-btn")
+      .addEventListener("click", () => addToQueue(song));
+    row
+      .querySelector(".playlist-row-btn")
+      .addEventListener("click", () => openAddToPlaylist(song));
+    if (allowRemove)
+      row.querySelector(".remove-row").addEventListener("click", () => {
+        removeLibraryItem(container, song);
+      });
+    row.addEventListener("dblclick", () => playCollection(items, i));
+    container.appendChild(row);
+  });
+}
+function removeLibraryItem(container, song) {
+  if (container === $("favoritesList")) removeFavorite(song);
+  else if (container === $("recentList")) {
+    recent = recent.filter((x) => x.id !== song.id);
+    save("voidRecent", recent);
+    renderRecent();
+    showToast("Removed from history");
+  }
+}
+function removeSearchHistory(query) {
+  searchHistory = searchHistory.filter((item) => item !== query);
+  save("voidSearchHistory", searchHistory);
+  renderSearchSuggestions();
+  showToast("Search removed");
+}
+function renderFavorites() {
+  $("favoritesSubtitle").textContent =
+    `${favorites.length} ${favorites.length === 1 ? "saved song" : "saved songs"}`;
+  renderLibraryList(
+    $("favoritesList"),
+    favorites,
+    "No favorites yet",
+    "Click the heart on any song to save it here.",
+    "♥",
+    true,
+  );
+}
+function renderFavoritesIfOpen() {
+  if (activePage === "favorites") renderFavorites();
+}
+function renderRecent() {
+  $("recentSubtitle").textContent = `${recent.length} songs`;
+  renderLibraryList(
+    $("recentList"),
+    recent,
+    "No listening history yet",
+    "Play a song and it will appear here.",
+    "◷",
+    true,
+  );
+}
+function renderQueuePage() {
+  $("queueSubtitle").textContent = `${queue.length} songs`;
+  renderLibraryList(
+    $("queuePageList"),
+    queue,
+    "Queue is empty",
+    "Add songs from search results.",
+    "♫",
+    false,
+  );
+}
+
+function renderPlaylists() {
+  const grid = $("playlistsGrid");
+  grid.innerHTML = "";
+  const names = Object.keys(playlists);
+  if (!names.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">▣</div><h3>No playlists</h3><p>Create your first playlist to start organizing music.</p></div>`;
+    return;
+  }
+  names.forEach((name) => {
+    const items = playlists[name];
+    const card = document.createElement("div");
+    card.className = "playlist-card";
+    card.innerHTML = `<div class="playlist-art">♫</div><h3>${escapeHTML(name)}</h3><p>${items.length} ${items.length === 1 ? "song" : "songs"}</p><div class="playlist-actions"><button class="secondary-button play-pl">▶ Play</button><button class="secondary-button del-pl">Delete</button></div>`;
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      openPlaylist(name);
+    });
+    card.querySelector(".play-pl").addEventListener("click", () => {
+      if (items.length) playCollection(items, 0, false);
+      else showToast("Playlist is empty");
+    });
+    card.querySelector(".del-pl").addEventListener("click", () => {
+      if (confirm(`Delete "${name}"?`)) deletePlaylist(name);
+    });
+    grid.appendChild(card);
+  });
+}
+function openPlaylist(name) {
+  const items = playlists[name] || [];
+  showToast(`${name}: ${items.length} songs`);
+  if (items.length) playCollection(items, 0, false);
+}
+function openCreatePlaylist() {
+  playlistNameInput.value = "";
+  playlistModal.classList.remove("hidden");
+  setTimeout(() => playlistNameInput.focus(), 50);
+}
+function openAddToPlaylist(song) {
+  activeContextSong = song;
+  addPlaylistSongTitle.textContent = cleanTitle(song.title);
+  playlistChoices.innerHTML = "";
+  const names = Object.keys(playlists);
+  if (!names.length) {
+    playlistChoices.innerHTML = `<div class="empty-state"><p>Create a playlist first.</p></div>`;
+  }
+  names.forEach((name) => {
+    const b = document.createElement("button");
+    b.className = "playlist-choice";
+    b.innerHTML = `<span>${escapeHTML(name)}</span><span>${playlists[name].length} songs</span>`;
+    b.addEventListener("click", () => addSongToPlaylist(name, song));
+    playlistChoices.appendChild(b);
+  });
+  addToPlaylistModal.classList.remove("hidden");
+}
+
+function openVoidPremium() {
+  try {
+    if (player && typeof player.pauseVideo === "function" && playerReady) {
+      player.pauseVideo();
+    }
+  } catch (e) {}
+
+  if (currentUser?.id) {
+    const avatar = profileData?.avatar || localStorage.getItem(`voidProfileImage:${currentUser.id}`) || "";
+    if (avatar) {
+      localStorage.setItem(`voidProfileImage:${currentUser.id}`, avatar);
+    }
+    localStorage.setItem("void_user", JSON.stringify({
+      id: currentUser.id,
+      name: currentUser.name || currentUser.email?.split("@")[0],
+      email: currentUser.email,
+      pfp: avatar
+    }));
+  }
+
+  window.location.href = "/premium";
+}
+
+function showPage(page) {
+  if (page === "premium") {
+    openVoidPremium();
+    return;
+  }
+  activePage = page;
+  document
+    .querySelectorAll(".page")
+    .forEach((p) => p.classList.remove("active-page"));
+  const target = $(`${page}Page`);
+  if (target) target.classList.add("active-page");
+  document
+    .querySelectorAll(".nav-item[data-page]")
+    .forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+  if (page === "favorites") renderFavorites();
+  if (page === "recent") renderRecent();
+  if (page === "queue") {
+    renderQueuePage();
+    openQueue();
+  }
+  if (page === "playlists") renderPlaylists();
+  if (page === "home") {
+  }
+  closeMobileMenu();
+}
+document
+  .querySelectorAll(".nav-item[data-page]")
+  .forEach((btn) =>
+    btn.addEventListener("click", () => showPage(btn.dataset.page)),
+  );
+settingsNav.addEventListener("click", () => showPage("settings"));
+$("premiumNavButton")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  openVoidPremium();
+});
+$("premiumBottomCard")?.addEventListener("click", (e) => {
+  e.preventDefault();
+  openVoidPremium();
+});
+
+function openMobileMenu() {
+  mobileSidebar.classList.add("mobile-open");
+  mobileNavOverlay.classList.add("open");
+  mobileMenuButton.setAttribute("aria-expanded", "true");
+  document.body.classList.add("menu-open");
+}
+function closeMobileMenu() {
+  mobileSidebar.classList.remove("mobile-open");
+  mobileNavOverlay.classList.remove("open");
+  mobileMenuButton.setAttribute("aria-expanded", "false");
+  document.body.classList.remove("menu-open");
+}
+mobileMenuButton.addEventListener("click", () => {
+  mobileSidebar.classList.contains("mobile-open")
+    ? closeMobileMenu()
+    : openMobileMenu();
+});
+mobileNavOverlay.addEventListener("click", closeMobileMenu);
+
+function renderSearchSuggestions() {
+  const q = searchInput.value.trim().toLowerCase();
+  searchSuggestions.innerHTML = "";
+  if (!q) {
+    renderSearchHistorySuggestions();
+    return;
+  }
+  const pool = [...recent, ...favorites];
+  const seen = new Set();
+  const matches = [];
+  searchHistory.forEach((query) => {
+    if (query.toLowerCase().includes(q) && !seen.has(query)) {
+      seen.add(query);
+      matches.push({ title: query, channel: "Search history", historyQuery: query });
+    }
+  });
+  pool.forEach((s) => {
+    const t = `${s.title} ${s.channel}`.toLowerCase();
+    if (t.includes(q) && !seen.has(s.title)) {
+      seen.add(s.title);
+      matches.push(s);
+    }
+  });
+  [
+    ["Bollywood songs", "latest Bollywood songs"],
+    ["Hindi songs", "latest Hindi songs"],
+    ["English pop", "popular English pop songs"],
+    ["Lo-fi music", "lofi chill beats"],
+    ["Workout music", "workout music mix"],
+    ["Devotional music", "latest devotional songs"],
+    ["Hip-hop and rap", "best hip hop rap songs"],
+    ["Classical piano", "best classical piano music"],
+  ].forEach(([label, query]) => {
+    if (label.toLowerCase().includes(q) && !matches.some((item) => item.historyQuery === query)) {
+      matches.push({ title: label, channel: "Suggested search", historyQuery: query, keywordSuggestion: true });
+    }
+  });
+  if (!matches.length) {
+    searchSuggestions.classList.add("hidden");
+    return;
+  }
+  matches.slice(0, 6).forEach((s) => {
+    const d = document.createElement("div");
+    d.className = `suggestion${s.historyQuery && !s.keywordSuggestion ? " history-suggestion" : ""}`;
+    if (s.historyQuery) {
+      if (s.keywordSuggestion) {
+        d.textContent = `⌕ ${s.title}`;
+      } else {
+        d.innerHTML = `<span>◷ ${escapeHTML(s.historyQuery)}</span><button class="history-delete" type="button" aria-label="Delete search">×</button>`;
+        d.querySelector(".history-delete").addEventListener("click", (event) => {
+          event.stopPropagation();
+          removeSearchHistory(s.historyQuery);
+        });
+      }
+    } else {
+      d.textContent = `${cleanTitle(s.title)} — ${s.channel}`;
+    }
+    d.addEventListener("click", () => {
+      searchInput.value = s.historyQuery || cleanTitle(s.title);
+      searchSuggestions.classList.add("hidden");
+      searchSongs();
+    });
+    searchSuggestions.appendChild(d);
+  });
+  searchSuggestions.classList.remove("hidden");
+}
+function renderSearchHistorySuggestions() {
+  if (!searchHistory.length) {
+    searchSuggestions.classList.add("hidden");
+    return;
+  }
+  searchSuggestions.innerHTML = "";
+  searchHistory.slice(0, 5).forEach((query) => {
+    const d = document.createElement("div");
+    d.className = "suggestion history-suggestion";
+    d.setAttribute("role", "button");
+    d.tabIndex = 0;
+    d.innerHTML = `<span>◷ ${escapeHTML(query)}</span><button class="history-delete" type="button" aria-label="Delete search">×</button>`;
+    d.querySelector(".history-delete").addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeSearchHistory(query);
+    });
+    d.addEventListener("click", () => {
+      searchInput.value = query;
+      searchSuggestions.classList.add("hidden");
+      searchSongs();
+    });
+    d.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") d.click();
+    });
+    searchSuggestions.appendChild(d);
+  });
+  const heading = document.createElement("div");
+  heading.className = "suggestion-heading";
+  heading.textContent = "SEARCH HISTORY";
+  searchSuggestions.prepend(heading);
+  searchSuggestions.classList.remove("hidden");
+}
+function getListeningTypes() {
+  const text = [...searchHistory, ...recent.map((song) => `${song.title} ${song.channel}`)]
+    .join(" ")
+    .toLowerCase();
+  const types = [
+    ["Bollywood", "latest Bollywood songs", /bollywood|hindi|tollywood|tamil|telugu/gi],
+    ["Pop", "popular pop songs", /pop|hits|top 50/gi],
+    ["Lo-fi & chill", "lofi chill beats", /lofi|lo-fi|chill|study|focus/gi],
+    ["Workout", "workout music mix", /workout|gym|fitness|motivation/gi],
+    ["Devotional", "devotional music", /bhajan|devotional|mantra|qawwali|spiritual/gi],
+    ["Hip-hop & rap", "hip hop rap songs", /hip.?hop|rap|trap|eminem/gi],
+    ["Rock", "best rock songs", /rock|metal|punk/gi],
+    ["Classical", "best classical piano music", /classical|piano|orchestra/gi],
+  ];
+  const ranked = types
+    .map(([label, query, pattern]) => ({ label, query, score: (text.match(pattern) || []).length }))
+    .sort((a, b) => b.score - a.score);
+  const listened = ranked.filter((item) => item.score > 0).slice(0, 5);
+  return listened.length
+    ? listened
+    : ranked.slice(0, 5).map(({ label, query }) => ({ label, query }));
+}
+function renderExploreSuggestions() {
+  const suggestions = getListeningTypes();
+  searchSuggestions.innerHTML = `<div class="suggestion-heading">YOUR LISTENING MIX</div>`;
+  suggestions.forEach(({ label, query }) => {
+    const d = document.createElement("button");
+    d.className = "suggestion explore-suggestion";
+    d.type = "button";
+    d.innerHTML = `<span>${escapeHTML(label)}</span><small>${escapeHTML(query)}</small>`;
+    d.addEventListener("click", () => {
+      searchInput.value = query;
+      searchSuggestions.classList.add("hidden");
+      searchSongs();
+    });
+    searchSuggestions.appendChild(d);
+  });
+  searchSuggestions.classList.remove("hidden");
+}
+searchInput.addEventListener("input", renderSearchSuggestions);
+searchInput.addEventListener("focus", renderSearchSuggestions);
+searchInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    searchSuggestions.classList.add("hidden");
+    searchSongs();
+  }
+});
+searchButton.addEventListener("click", () => {
+  searchSuggestions.classList.add("hidden");
+  searchSongs();
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest(".search-container"))
+    searchSuggestions.classList.add("hidden");
+});
+exploreButton.addEventListener("click", () => {
+  showPage("home");
+  searchInput.focus();
+  renderExploreSuggestions();
+  document.querySelector(".header").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+playResultsButton.addEventListener("click", () =>
+  playCollection(songs, 0, false),
+);
+shuffleResultsButton.addEventListener("click", () =>
+  playCollection(songs, 0, true),
+);
+$("playFavoritesButton").addEventListener("click", () =>
+  playCollection(favorites, 0, false),
+);
+$("shuffleFavoritesButton").addEventListener("click", () =>
+  playCollection(favorites, 0, true),
+);
+$("clearRecentButton").addEventListener("click", () => {
+  recent = [];
+  save("voidRecent", recent);
+  renderRecent();
+  showToast("History cleared");
+});
+$("clearQueuePageButton").addEventListener("click", clearQueueAll);
+$("createPlaylistButton").addEventListener("click", openCreatePlaylist);
+savePlaylistButton.addEventListener("click", () =>
+  createPlaylist(playlistNameInput.value),
+);
+playlistNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") createPlaylist(playlistNameInput.value);
+});
+
+function applyTheme() {
+  document.body.classList.toggle("light-mode", settings.theme === "light");
+  $("themeSelect").value = settings.theme;
+}
+themeButton.addEventListener("click", () => {
+  settings.theme = settings.theme === "dark" ? "light" : "dark";
+  save("voidSettings", settings);
+  applyTheme();
+});
+$("themeSelect").addEventListener("change", (e) => {
+  settings.theme = e.target.value;
+  save("voidSettings", settings);
+  applyTheme();
+});
+$("autoplayToggle").addEventListener("change", (e) => {
+  settings.autoplayQueue = e.target.checked;
+  save("voidSettings", settings);
+});
+$("rememberVolumeToggle").addEventListener("change", (e) => {
+  settings.rememberVolume = e.target.checked;
+  save("voidSettings", settings);
+});
+function initSettings() {
+  $("autoplayToggle").checked = settings.autoplayQueue;
+  $("rememberVolumeToggle").checked = settings.rememberVolume;
+  applyTheme();
+}
+
+function openNowPlaying() {
+  nowPlayingModal.classList.remove("hidden");
+}
+fullscreenPlayerButton.addEventListener("click", openNowPlaying);
+$("openPlayerButton").addEventListener("click", openNowPlaying);
+async function openLyrics() {
+  lyricsTitle.textContent = currentSong ? cleanTitle(currentSong.title) : "Lyrics";
+  lyricsText.textContent = currentSong ? "Finding lyrics…" : "Play a song first.";
+  lyricsModal.classList.add("lyrics-fullscreen");
+  lyricsModal.classList.remove("hidden");
+  if(!currentSong) return;
+  try {
+    const r=await fetch(`/api/lyrics?artist=${encodeURIComponent(currentSong.channel||"")}&title=${encodeURIComponent(cleanTitle(currentSong.title))}`);
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.error||"Lyrics not found");
+    lyricsText.textContent=d.lyrics||"Lyrics unavailable.";
+  } catch(e) { lyricsText.textContent=`${e.message}. Lyrics availability depends on the provider.`; }
+}
+$("lyricsButton").addEventListener("click", openLyrics);
+$("modalQueueButton").addEventListener("click", () => {
+  closeAllModals();
+  openQueue();
+});
+$("shortcutsButton").addEventListener("click", () =>
+  shortcutsModal.classList.remove("hidden"),
+);
+document
+  .querySelectorAll("[data-close-modal]")
+  .forEach((el) => el.addEventListener("click", closeAllModals));
+function closeAllModals() {
+  document.querySelectorAll(".modal").forEach((m) => m.classList.add("hidden"));
+}
+
+$("clearFavoritesButton").addEventListener("click", () => {
+  if (confirm("Clear all favorites?")) {
+    favorites = [];
+    save("voidFavorites", favorites);
+    updateFavoriteButton();
+    updateBadges();
+    renderFavoritesIfOpen();
+    showToast("Favorites cleared");
+  }
+});
+$("profileButton").addEventListener("click", (event) => {
+  event.stopPropagation();
+  profileMenu.classList.toggle("hidden");
+  $("profileButton").setAttribute(
+    "aria-expanded",
+    String(!profileMenu.classList.contains("hidden")),
+  );
+});
+avatarInput.addEventListener("change", () => {
+  const file = avatarInput.files?.[0];
+  if (!file || !currentUser) return;
+  if (file.size > 350000) {
+    showToast("Profile image is too large");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const avatar = String(reader.result || "");
+      const r = await fetch("/api/profile", {
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({...profileData, avatar})
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Upload failed");
+      profileData = d.profile || {...profileData, avatar};
+      updateProfileUI(currentUser, profileData);
+      showToast("Profile picture updated");
+    } catch {
+      showToast("Could not update profile picture");
+    }
+  };
+  reader.readAsDataURL(file);
+});
+logoutButton.addEventListener("click", logout);
+document.addEventListener("click", (event) => {
+  if (!event.target.closest("#profileMenu") && !event.target.closest("#profileButton")) {
+    profileMenu.classList.add("hidden");
+    $("profileButton").setAttribute("aria-expanded", "false");
+  }
+});
+$("resetAppButton").addEventListener("click", async () => {
+  if (!confirm("Reset your VOID Music library from MongoDB? This will clear favorites, queue, history, playlists and settings.")) return;
+  try {
+    const r = await fetch("/api/library/reset", {method:"POST"});
+    if (!r.ok) throw new Error();
+    clearLegacyBrowserData();
+    location.reload();
+  } catch {
+    showToast("Could not reset your MongoDB library");
+  }
+});
+
+function openContextMenu(song, x, y) {
+  activeContextSong = song;
+  contextMenu.style.left = Math.min(x, window.innerWidth - 210) + "px";
+  contextMenu.style.top = Math.min(y, window.innerHeight - 220) + "px";
+  contextMenu.classList.remove("hidden");
+}
+contextMenu.addEventListener("click", (e) => {
+  const action = e.target.closest("button")?.dataset.action;
+  if (!action || !activeContextSong) return;
+  const s = activeContextSong;
+  if (action === "favorite") toggleFavorite(s);
+  if (action === "queue") addToQueue(s);
+  if (action === "playlist") openAddToPlaylist(s);
+  if (action === "play") {
+    const idx = songs.findIndex((x) => x.id === s.id);
+    if (idx >= 0) playSong(idx);
+    else {
+      songs = [s];
+      currentIndex = 0;
+      playSong(0);
+    }
+  }
+  contextMenu.classList.add("hidden");
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#contextMenu")) contextMenu.classList.add("hidden");
+});
+playerMoreButton.addEventListener("click", (e) => {
+  if (currentSong) openContextMenu(currentSong, e.clientX, e.clientY);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input,textarea,select")) return;
+  if (e.key === "Escape") {
+    closeAllModals();
+    closeQueuePanel();
+    contextMenu.classList.add("hidden");
+    return;
+  }
+  if (e.code === "Space") {
+    e.preventDefault();
+    playButton.click();
+  }
+  if (e.code === "ArrowLeft" && playerReady && currentIndex !== -1)
+    player.seekTo(Math.max(0, player.getCurrentTime() - 5), true);
+  if (e.code === "ArrowRight" && playerReady && currentIndex !== -1)
+    player.seekTo(
+      Math.min(player.getDuration(), player.getCurrentTime() + 5),
+      true,
+    );
+  if (e.code === "ArrowUp") {
+    e.preventDefault();
+    changeVolume(5);
+  }
+  if (e.code === "ArrowDown") {
+    e.preventDefault();
+    changeVolume(-5);
+  }
+  if (e.key.toLowerCase() === "s") toggleShuffle();
+  if (e.key.toLowerCase() === "r") cycleRepeat();
+  if (e.key.toLowerCase() === "f" && currentSong) toggleFavorite(currentSong);
+  if (e.key.toLowerCase() === "q") openQueue();
+});
+
+
+async function registerDevice(){
+  try{
+    if (!currentUser) return;
+    const raw = `${currentUser.id}|${navigator.platform}|${navigator.userAgent.includes("Mobile") ? "mobile" : "web"}`;
+    const bytes = new TextEncoder().encode(raw);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const id = "device-" + [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2,"0")).join("").slice(0,24);
+    await fetch("/api/devices",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({id,name:navigator.userAgent.includes("Mobile")?"VOID Mobile":"VOID Web",platform:navigator.platform})
+    });
+  }catch{}
+}
+window.VOID={playSong,playCollection,toggleFavorite,addToQueue,openAddToPlaylist,searchSongs,openNowPlaying,openLyrics,showToast,getState:()=>({currentSong,favorites,queue,recent,playlists,settings})};
+
+updateBadges();
+renderQueue();
+renderFavorites();
+renderRecent();
+renderQueuePage();
+renderPlaylists();
+initSettings();
+updateMuteIcon();
+loadProfile().finally(() => loadDiscoverFeed());
+console.log("VOID Music Player — MAX edition loaded.");
+
+function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","\'":"&#39;"}[m]||m));}
+
+
+// =====================================================
+// VOID 4.0 — DISCOVER / RADIO / STATS / GAME
+// =====================================================
+function voidSafeText(v){return String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));}
+
+const smartHomeButton=$("smartHomeButton");
+exploreButton?.addEventListener("click",()=>{ searchInput.focus(); showPage("home"); });
+smartHomeButton?.addEventListener("click",async()=>{
+  await loadDiscoverFeed();
+  if(songs.length) playSong(Math.floor(Math.random()*Math.min(songs.length,8)),true);
+});
+
+async function startVoidRadio(query,label){
+  showPage("radio");
+  const title=$("radioTitle"), desc=$("radioDescription");
+  if(title) title.textContent="Building your Indian station…";
+  try{
+    const r=await fetch(`/api/radio?station=${encodeURIComponent(query)}`);
+    const d=await r.json();
+    if(!r.ok || !Array.isArray(d.results) || !d.results.length) throw new Error(d.error||"No Indian tracks found");
+    songs=d.results.map(normalizeSong);
+    activeCollection="radio"; currentIndex=0;
+    queue=songs.slice(1,15); save("voidQueue",queue); renderQueue(); updateBadges();
+    playSong(0,true);
+    if(title) title.textContent=label||"VOID Radio";
+    if(desc) desc.textContent=`Indian ${label||"music"} • ${d.reason||"Personalized from your listening"}`;
+    showToast(`VOID Radio: ${label||query}`);
+  }catch(e){if(title)title.textContent="Station unavailable";if(desc)desc.textContent=e.message||"Try another station.";}
+}
+document.querySelectorAll("[data-radio]").forEach(card=>card.addEventListener("click",()=>startVoidRadio(card.dataset.radio,card.querySelector("b")?.textContent)));
+$("radioStopButton")?.addEventListener("click",()=>{try{player?.pauseVideo()}catch{};showToast("Radio paused")});
+
+async function renderVoidStats(){
+  try{
+    const r=await fetch("/api/stats"); if(!r.ok) throw new Error(); const d=await r.json();
+    $("pageTotalPlays").textContent=d.totalPlays||0; $("pageTotalFavorites").textContent=d.totalFavorites||0; $("pageTotalPlaylists").textContent=d.totalPlaylists||0; $("pageRecentCount").textContent=(d.history||[]).length;
+    const artists=$("pageTopArtists"); const top=d.topArtists||[]; const max=Math.max(1,...top.map(x=>x.plays));
+    artists.innerHTML=top.length?top.map(x=>`<div class="artist-bar"><span title="${voidSafeText(x.artist)}">${voidSafeText(x.artist)}</span><div class="artist-track"><div class="artist-fill" style="width:${Math.max(5,(x.plays/max)*100)}%"></div></div><b>${x.plays}</b></div>`).join(""):"<p class='muted'>Play some music to build your stats.</p>";
+    const list=$("pageRecentStats"); const history=d.history||[]; list.innerHTML=history.length?history.slice(0,8).map(x=>`<div class="stats-song"><img src="${voidSafeText(x.thumbnail||"")}" alt=""><div><b>${voidSafeText(cleanTitle(x.title))}</b><span>${voidSafeText(x.channel||"YouTube")}</span></div></div>`).join(""):"<p class='muted'>Your listening history will appear here.</p>";
+  }catch{showToast("Stats could not be refreshed");}
+}
+$("refreshStatsPage")?.addEventListener("click",()=>{renderVoidStats();showToast("Stats refreshed")});
+
+let gameRound=0,gameScore=0,gameStreak=0,gameAnswer=null,gameSongs=[];
+const gameQueries=["popular music","top hits","bollywood songs","english hits","lofi music","rock classics"];
+async function startVoidGame(){
+  gameRound=0;gameScore=0;gameStreak=0;gameAnswer=null; updateGameScore(); await nextGameRound();
+}
+function updateGameScore(){$("gameRound").textContent=gameRound;$('gameScore').textContent=gameScore;$('gameStreak').textContent=gameStreak;}
+async function nextGameRound(){
+  if(gameRound>=5){$("gameQuestion").textContent=`Final score: ${gameScore}/5`;$("gameHint").textContent=gameScore>=4?"VOID thinks you know your music.":"Run it again and beat your score.";$("gameChoices").innerHTML="";return;}
+  const q=gameQueries[Math.floor(Math.random()*gameQueries.length)];
+  try{
+    const r=await fetch(`/api/search?q=${encodeURIComponent(q)}`); const d=await r.json(); if(!r.ok||!d.results?.length)throw new Error();
+    gameSongs=d.results.slice(0,8); gameAnswer=gameSongs[Math.floor(Math.random()*gameSongs.length)]; gameRound++; updateGameScore();
+    $("gameQuestion").textContent="Which track is this?";$("gameHint").textContent="Pick the title you think is correct. Then VOID will play it.";$("gameArt").style.backgroundImage=`url(${gameAnswer.thumbnail})`;$("gameArt").querySelector(".game-art-inner").textContent="?";
+    const choices=[gameAnswer,...gameSongs.filter(x=>x.id!==gameAnswer.id).sort(()=>Math.random()-.5).slice(0,3)].sort(()=>Math.random()-.5);
+    $("gameChoices").innerHTML=choices.map(x=>`<button class="game-choice" data-id="${voidSafeText(x.id)}">${voidSafeText(cleanTitle(x.title))}<small>${voidSafeText(x.channel)}</small></button>`).join("");
+    document.querySelectorAll(".game-choice").forEach(btn=>btn.addEventListener("click",()=>answerGame(btn.dataset.id)));
+  }catch{ $("gameQuestion").textContent="Game needs a search connection";$("gameHint").textContent="Check your YouTube API key and try again."; }
+}
+function answerGame(id){
+  const buttons=[...document.querySelectorAll(".game-choice")]; buttons.forEach(b=>b.disabled=true);
+  const correct=id===gameAnswer.id; const chosen=gameSongs.find(x=>x.id===id); const button=buttons.find(b=>b.dataset.id===id);
+  if(correct){gameScore++;gameStreak++;button?.classList.add("correct");showToast("Correct! +1");}
+  else{gameStreak=0;button?.classList.add("wrong");buttons.find(b=>b.dataset.id===gameAnswer.id)?.classList.add("correct");showToast(`The answer was ${cleanTitle(gameAnswer.title)}`);}
+  updateGameScore(); songs=gameSongs; currentIndex=gameSongs.findIndex(x=>x.id===gameAnswer.id); if(currentIndex>=0) playSong(currentIndex,true);
+  setTimeout(nextGameRound,1100);
+}
+$("startGameButton")?.addEventListener("click",startVoidGame); $("gamePlayButton")?.addEventListener("click",()=>{if(gameAnswer){songs=gameSongs;currentIndex=gameSongs.findIndex(x=>x.id===gameAnswer.id);playSong(currentIndex,true)}});
+
+// Ctrl/Cmd + K focuses the universal search. Escape returns to Discover.
+document.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchInput.focus();searchInput.select();} if(e.key==="Escape"&&activePage!=="home"&&document.activeElement!==searchInput)showPage("home");});
+
+// Extend page lifecycle without disturbing the original player.
+const originalShowPage=showPage;
+showPage=function(page){ originalShowPage(page); if(page==="stats")renderVoidStats(); if(page==="game"&&gameRound===0){} };
+
+console.log("VOID Music Player 4.0 — Major Update loaded.");
+
+// ==================== PWA INSTALLATION & SERVICE WORKER ====================
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const navBtn = $("installAppNav");
+  if (navBtn) navBtn.style.display = "flex";
+  const headerBtn = $("installAppHeader");
+  if (headerBtn) headerBtn.classList.remove("hidden");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  $("installAppNav")?.style.setProperty("display", "none");
+  $("installAppHeader")?.classList.add("hidden");
+  showToast("VOID Music Player installed successfully!");
+});
+
+async function triggerPwaInstall() {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    if (outcome === "accepted") {
+      $("installAppNav")?.style.setProperty("display", "none");
+      $("installAppHeader")?.classList.add("hidden");
+    }
+    deferredInstallPrompt = null;
+  } else {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS) {
+      alert("To install VOID on iPhone/iPad:\n1. Tap the Share button (⎋) at the bottom of Safari.\n2. Scroll down and tap 'Add to Home Screen' (+).\n3. Tap 'Add' in the top right corner.");
+    } else {
+      alert("To install VOID App:\nClick your browser menu (⋮ in Chrome/Edge) and select 'Install app' or 'Add to Home screen'.");
+    }
+  }
+}
+
+$("installAppNav")?.addEventListener("click", triggerPwaInstall);
+$("installAppHeader")?.addEventListener("click", triggerPwaInstall);
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

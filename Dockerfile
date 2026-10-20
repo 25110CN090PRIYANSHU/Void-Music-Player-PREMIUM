@@ -6,9 +6,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-# Install dependencies
+# Install dependencies (lockfile sync with fallback)
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev || npm install --omit=dev
 
 # Copy source code and pre-built client bundles
 COPY . .

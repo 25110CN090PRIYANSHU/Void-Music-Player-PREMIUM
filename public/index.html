@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07080b" />
+    <meta name="description" content="VOID — a premium YouTube music player." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="VOID Music" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <title>VOID Music</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="logo">
+          <div class="logo-icon">V</div>
+          <span>VOID</span>
+        </div>
+
+        <nav>
+          <div class="nav-section">
+            <p class="nav-title">MENU</p>
+            <button class="nav-item active" data-page="home">
+              <span>⌂</span><span>Home</span>
+            </button>
+            <button class="nav-item" data-page="favorites">
+              <span>♥</span><span>Favorites</span
+              ><b id="favoriteBadge" class="nav-badge">0</b>
+            </button>
+            <button class="nav-item" data-page="playlists">
+              <span>▣</span><span>Playlists</span>
+            </button>
+            <button class="nav-item" data-page="radio"><span>◉</span><span>VOID Radio</span></button>
+            <button class="nav-item" data-page="stats"><span>⌁</span><span>Your Stats</span></button>
+            <button class="nav-item" data-page="game"><span>◆</span><span>Music Game</span></button>
+            <button class="nav-item nav-item-premium" id="premiumNavButton" data-page="premium" title="Switch to VOID Premium (Free)">
+              <span class="premium-icon">👑</span>
+              <span class="premium-text">VOID Premium</span>
+              <span class="premium-badge">FREE</span>
+            </button>
+          </div>
+
+          <div class="nav-section">
+            <p class="nav-title">LIBRARY</p>
+            <button class="nav-item" data-page="recent">
+              <span>◷</span><span>Recently Played</span>
+            </button>
+            <button class="nav-item" data-page="queue">
+              <span>♫</span><span>Queue</span
+              ><b id="queueBadge" class="nav-badge">0</b>
+            </button>
+          </div>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <button id="settingsNav" class="nav-item">
+            <span>⚙</span><span>Settings</span>
+          </button>
+          <button id="installAppNav" class="nav-item" style="display: none;" title="Install VOID App">
+            <span>⤓</span><span>Install App</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="header">
+          <button id="mobileMenuButton" class="mobile-menu-button" aria-label="Open navigation menu" aria-expanded="false">
+            <span></span><span></span><span></span>
+          </button>
+          <div class="mobile-logo">VOID</div>
+
+          <div class="search-container">
+            <span class="search-icon">⌕</span>
+            <input
+              id="searchInput"
+              type="text"
+              placeholder="Search songs, artists, albums..."
+              autocomplete="off"
+            />
+            <button id="voiceSearchButton" title="Voice search">🎙</button><button id="searchButton">Search</button>
+            <div id="searchSuggestions" class="search-suggestions hidden"></div>
+          </div>
+
+          <div class="header-actions">
+            <button id="installAppHeader" class="small-button hidden" title="Install VOID as an app" style="border-color: rgba(245,158,11,0.5); color: #f59e0b; margin-right: 4px; font-weight: 700;">
+              ⤓ Install App
+            </button>
+            <button id="themeButton" class="icon-button" title="Toggle theme">
+              ◐
+            </button>
+            <button id="profileButton" class="profile-button" title="Profile" aria-expanded="false">
+              <span id="profileInitial">P</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="content">
+          <section id="homePage" class="page active-page">
+            <section class="hero">
+              <div class="hero-content">
+                <span class="hero-label">VOID 4.0 • MUSIC UNIVERSE</span>
+                <h1>Music without<br />the <span>friction.</span></h1>
+                <p>
+                  Search, discover, save, remix and play — with your library synced across your devices.
+                </p>
+                <button id="exploreButton" class="primary-button">
+                  Start discovering <span>→</span>
+                </button>
+                <button id="smartHomeButton" class="secondary-button">✦ Surprise me</button>
+              </div>
+              <div class="hero-visual">
+                <div class="orb orb-1"></div>
+                <div class="orb orb-2"></div>
+                <div class="vinyl"><div class="vinyl-center">V</div></div>
+              </div>
+            </section>
+
+            <section class="music-section">
+              <div class="section-header">
+                <div>
+                  <span class="section-label" id="sectionLabel">MADE FOR YOU • INDIA</span>
+                  <h2 id="sectionTitle">Your Discover Feed</h2>
+                  <p id="discoverReason" class="discover-reason">Indian music first. VOID learns your taste as you listen.</p>
+                </div>
+                <div id="resultActions" class="section-actions hidden">
+                  <button id="playResultsButton" class="small-button">
+                    ▶ Play all
+                  </button>
+                  <button id="shuffleResultsButton" class="small-button">
+                    ⤨ Shuffle
+                  </button>
+                </div>
+              </div>
+
+              <div id="loading" class="loading hidden">
+                <div class="loader"></div>
+                <span>Searching YouTube...</span>
+              </div>
+              <div id="errorMessage" class="error-message hidden"></div>
+              <div id="results" class="song-grid"></div>
+            </section>
+          </section>
+
+          <section id="favoritesPage" class="page">
+            <div class="page-heading">
+              <div>
+                <span class="section-label">YOUR LIBRARY</span>
+                <h1>Favorites</h1>
+                <p id="favoritesSubtitle">0 saved songs</p>
+              </div>
+              <div class="page-actions">
+                <button id="playFavoritesButton" class="primary-button small">
+                  ▶ Play all
+                </button>
+                <button id="shuffleFavoritesButton" class="secondary-button">
+                  ⤨ Shuffle
+                </button>
+              </div>
+            </div>
+            <div id="favoritesList" class="library-list"></div>
+          </section>
+
+          <section id="recentPage" class="page">
+            <div class="page-heading">
+              <div>
+                <span class="section-label">HISTORY</span>
+                <h1>Recently Played</h1>
+                <p id="recentSubtitle">0 songs</p>
+              </div>
+              <button id="clearRecentButton" class="secondary-button">
+                Clear history
+              </button>
+            </div>
+            <div id="recentList" class="library-list"></div>
+          </section>
+
+          <section id="queuePage" class="page">
+            <div class="page-heading">
+              <div>
+                <span class="section-label">UP NEXT</span>
+                <h1>Queue</h1>
+                <p id="queueSubtitle">0 songs</p>
+              </div>
+              <button id="clearQueuePageButton" class="secondary-button">
+                Clear queue
+              </button>
+            </div>
+            <div id="queuePageList" class="library-list"></div>
+          </section>
+
+          <section id="playlistsPage" class="page">
+            <div class="page-heading">
+              <div>
+                <span class="section-label">YOUR COLLECTION</span>
+                <h1>Playlists</h1>
+                <p>Create collections and keep your music organized.</p>
+              </div>
+              <button id="createPlaylistButton" class="primary-button small">
+                ＋ New playlist
+              </button>
+            </div>
+            <div id="playlistsGrid" class="playlist-grid"></div>
+          </section>
+
+
+          <section id="radioPage" class="page">
+            <div class="page-heading major-heading"><div><span class="section-label">VOID RADIO</span><h1>Pick a mood.<br><span>We'll pick the music.</span></h1><p>One tap creates a live queue from YouTube.</p></div></div>
+            <div class="radio-grid">
+              <button class="radio-card radio-purple" data-radio="late night chill"><span>◐</span><b>Late Night</b><small>Dreamy • ambient • lofi</small></button>
+              <button class="radio-card radio-blue" data-radio="focus study coding music"><span>⌁</span><b>Deep Focus</b><small>Study • coding • concentration</small></button>
+              <button class="radio-card radio-red" data-radio="high energy workout music"><span>↯</span><b>Power Mode</b><small>Gym • energy • motivation</small></button>
+              <button class="radio-card radio-gold" data-radio="bollywood hits party mix"><span>✦</span><b>Bollywood</b><small>Hits • party • desi vibes</small></button>
+              <button class="radio-card radio-green" data-radio="indie alternative music mix"><span>◇</span><b>Indie Orbit</b><small>Alternative • fresh finds</small></button>
+              <button class="radio-card radio-pink" data-radio="romantic love songs mix"><span>♡</span><b>After Hours</b><small>Romantic • slow • emotional</small></button>
+            </div>
+            <div class="radio-now"><div><span class="section-label">LIVE RADIO</span><h2 id="radioTitle">Nothing queued yet</h2><p id="radioDescription">Choose a station and VOID will build a queue.</p></div><button id="radioStopButton" class="secondary-button">Stop radio</button></div>
+          </section>
+
+          <section id="statsPage" class="page">
+            <div class="page-heading major-heading"><div><span class="section-label">YOUR VOID</span><h1>Your listening<br><span>universe.</span></h1><p>A private view of how you use VOID.</p></div><button id="refreshStatsPage" class="secondary-button">↻ Refresh</button></div>
+            <div class="stats-hero-grid">
+              <article class="big-stat"><span>Total plays</span><strong id="pageTotalPlays">0</strong><small>songs started on this account</small></article>
+              <article class="big-stat"><span>Favorites</span><strong id="pageTotalFavorites">0</strong><small>saved for later</small></article>
+              <article class="big-stat"><span>Playlists</span><strong id="pageTotalPlaylists">0</strong><small>your collections</small></article>
+              <article class="big-stat"><span>Recent songs</span><strong id="pageRecentCount">0</strong><small>listening history</small></article>
+            </div>
+            <div class="stats-columns"><article class="stats-panel"><span class="section-label">TOP ARTISTS</span><h2>What keeps you listening</h2><div id="pageTopArtists" class="artist-bars"></div></article><article class="stats-panel"><span class="section-label">RECENTLY PLAYED</span><h2>Your latest sessions</h2><div id="pageRecentStats" class="stats-song-list"></div></article></div>
+          </section>
+
+          <section id="gamePage" class="page">
+            <div class="page-heading major-heading"><div><span class="section-label">VOID GAME</span><h1>Can you guess<br><span>the track?</span></h1><p>Hear the song, then pick the correct title from four choices.</p></div><button id="startGameButton" class="primary-button small">▶ Start game</button></div>
+            <div class="game-shell"><div class="game-score"><span>ROUND <b id="gameRound">0</b>/5</span><span>SCORE <b id="gameScore">0</b></span><span>STREAK <b id="gameStreak">0</b>🔥</span></div><div class="game-art" id="gameArt"><div class="game-art-inner">V</div></div><h2 id="gameQuestion">Press Start Game</h2><p id="gameHint">VOID will search a music category and create a playable quiz.</p><div id="gameChoices" class="game-choices"></div><button id="gamePlayButton" class="secondary-button hidden">▶ Play clip</button></div>
+          </section>
+
+          <section id="profilePage" class="page">
+            <div class="page-heading"><div><span class="section-label">ACCOUNT</span><h1>VOID Profile</h1><p>Control your public identity and shared playlists.</p></div></div>
+            <div class="profile-editor-card"><div class="profile-avatar-edit" id="profileEditorAvatar">V</div><div class="profile-fields"><label>Name<input id="profileEditName" disabled></label><label>Email<input id="profileEditEmail" disabled></label><label>Bio<textarea id="profileEditBio" maxlength="240" placeholder="Tell people about your music..."></textarea></label><label class="toggle-row"><span>Public profile</span><input id="publicProfileToggle" type="checkbox"><i></i></label><button id="saveProfileButton" class="primary-button small">Save profile</button></div></div>
+          </section>
+
+          <section id="settingsPage" class="page">
+            <div class="page-heading">
+              <div>
+                <span class="section-label">PREFERENCES</span>
+                <h1>Settings</h1>
+                <p>Customize VOID on this device.</p>
+              </div>
+            </div>
+            <div class="settings-grid">
+              <div class="settings-card">
+                <h3>Appearance</h3>
+                <p>Choose how VOID looks.</p>
+                <div class="setting-row">
+                  <span>Theme</span
+                  ><select id="themeSelect">
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                  </select>
+                </div>
+              </div>
+              <div class="settings-card">
+                <h3>Playback</h3>
+                <p>Control how songs behave.</p>
+                <label class="toggle-row"
+                  ><span>Autoplay queue</span
+                  ><input id="autoplayToggle" type="checkbox" checked /><i></i
+                ></label>
+                <label class="toggle-row"><span>Crossfade</span><select id="crossfadeSelect"><option value="0">Off</option><option value="2">2 sec</option><option value="5">5 sec</option><option value="10">10 sec</option></select></label>
+                <label class="toggle-row"
+                  ><span>Remember volume</span
+                  ><input
+                    id="rememberVolumeToggle"
+                    type="checkbox"
+                    checked /><i></i
+                ></label>
+              </div>
+              <div class="settings-card">
+                <h3>Player</h3>
+                <p>Quick controls for the player.</p>
+                <button id="openPlayerButton" class="secondary-button full">
+                  Open Now Playing
+                </button>
+                <button id="shortcutsButton" class="secondary-button full">
+                  Keyboard shortcuts
+                </button>
+              </div>
+              <div class="settings-card danger-card">
+                <h3>Storage</h3>
+                <p>Remove locally saved VOID data.</p>
+                <button id="clearFavoritesButton" class="secondary-button full">
+                  Clear favorites
+                </button>
+                <button id="resetAppButton" class="danger-button full">
+                  Reset all VOID data
+                </button>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <div id="mobileNavOverlay" class="mobile-nav-overlay"></div>
+
+    <div id="youtubePlayer" class="youtube-player"></div>
+
+    <footer class="player">
+      <div id="nowPlaying" class="now-playing">
+        <div class="cover-wrapper">
+          <img id="playerThumbnail" src="" alt="Album artwork" />
+          <div id="playingIndicator" class="playing-indicator">
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+        <div class="player-info">
+          <strong id="playerTitle">Nothing playing</strong
+          ><span id="playerArtist">Search for a song</span>
+        </div>
+        <button id="favoriteButton" class="player-heart" title="Favorite">
+          ♡
+        </button>
+        <button id="playerMoreButton" class="more-button" title="More">
+          ⋮
+        </button>
+      </div>
+
+      <div class="player-center">
+        <div class="player-controls">
+          <button id="shuffleButton" class="control" title="Shuffle (S)">
+            ⤨
+          </button>
+          <button id="previousButton" class="control" title="Previous">
+            ⏮
+          </button>
+          <button id="playButton" class="play-button" title="Play (Space)">
+            ▶
+          </button>
+          <button id="nextButton" class="control" title="Next">⏭</button>
+          <button id="repeatButton" class="control" title="Repeat (R)">
+            ↻
+          </button>
+        </div>
+        <div class="progress-container">
+          <span id="currentTime">0:00</span>
+          <input
+            id="progress"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+            step="0.1"
+          />
+          <span id="duration">0:00</span>
+        </div>
+      </div>
+
+      <div class="player-right">
+        <button id="queueOpenButton" class="volume-button" title="Queue">
+          ♫
+        </button>
+        <button id="muteButton" class="volume-button" title="Mute">🔊</button>
+        <input id="volume" type="range" min="0" max="100" value="80" />
+        <button
+          id="fullscreenPlayerButton"
+          class="volume-button"
+          title="Now Playing"
+        >
+          ↗
+        </button>
+      </div>
+    </footer>
+
+    <div id="queueOverlay" class="overlay"></div>
+    <aside id="queuePanel" class="queue-panel">
+      <div class="drawer-header">
+        <div>
+          <span class="section-label">YOUR QUEUE</span>
+          <h2>Up Next</h2>
+        </div>
+        <button id="closeQueue" class="close-button">×</button>
+      </div>
+      <div class="drawer-actions">
+        <span id="queueCount">0 songs</span
+        ><button id="clearQueue">Clear</button>
+      </div>
+      <div id="queueList" class="queue-list"></div>
+    </aside>
+
+    <div id="nowPlayingModal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="now-modal">
+        <button class="modal-close" data-close-modal>×</button>
+        <div class="now-modal-art-wrap">
+          <img id="modalThumbnail" src="" alt="" />
+          <div class="visualizer" id="visualizer">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i
+            ><i></i><i></i><i></i>
+          </div>
+        </div>
+        <span class="section-label">NOW PLAYING</span>
+        <h2 id="modalTitle">Nothing playing</h2>
+        <p id="modalArtist">—</p>
+        <div class="modal-progress">
+          <span id="modalCurrent">0:00</span
+          ><input
+            id="modalProgress"
+            type="range"
+            min="0"
+            max="100"
+            value="0"
+            step=".1"
+          /><span id="modalDuration">0:00</span>
+        </div>
+        <div class="modal-controls">
+          <button id="modalShuffle">⤨</button><button id="modalPrev">⏮</button
+          ><button id="modalPlay" class="modal-play">▶</button
+          ><button id="modalNext">⏭</button><button id="modalRepeat">↻</button>
+        </div>
+        <div class="modal-links">
+          <button id="lyricsButton">♪ Lyrics</button
+          ><button id="modalQueueButton">♫ Queue</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="lyricsModal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="lyrics-modal">
+        <button class="modal-close" data-close-modal>×</button>
+        <span class="section-label">LYRICS</span>
+        <h2 id="lyricsTitle">Lyrics</h2>
+        <p id="lyricsText">
+          Lyrics are not fetched automatically by VOID. Use the YouTube video or
+          a licensed lyrics source for the current song.
+        </p>
+      </div>
+    </div>
+
+    <div id="contextMenu" class="context-menu hidden">
+      <button data-action="favorite">♡ Favorite</button>
+      <button data-action="queue">＋ Add to queue</button>
+      <button data-action="playlist">▣ Add to playlist</button>
+      <button data-action="play">▶ Play now</button>
+    </div>
+
+    <div id="toastContainer" class="toast-container"></div>
+    <div id="profileMenu" class="profile-menu hidden">
+      <div class="profile-summary">
+        <div id="profileAvatarLarge" class="profile-avatar-large">P</div>
+        <div><strong id="profileName">Profile</strong><small id="profileEmail"></small></div>
+      </div>
+      <label class="avatar-upload" for="avatarInput">Change profile picture</label>
+      <input id="avatarInput" class="hidden" type="file" accept="image/png,image/jpeg,image/webp" />
+      <button id="logoutButton" class="profile-logout">Log out</button>
+    </div>
+
+    <div id="playlistModal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="form-modal">
+        <button class="modal-close" data-close-modal>×</button>
+        <span class="section-label">PLAYLIST</span>
+        <h2>Create playlist</h2>
+        <input
+          id="playlistNameInput"
+          class="text-input"
+          maxlength="40"
+          placeholder="e.g. Coding, Workout, Chill"
+        />
+        <button id="savePlaylistButton" class="primary-button full">
+          Create
+        </button>
+      </div>
+    </div>
+
+    <div id="addToPlaylistModal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="form-modal">
+        <button class="modal-close" data-close-modal>×</button>
+        <span class="section-label">ADD SONG</span>
+        <h2 id="addPlaylistSongTitle">Choose playlist</h2>
+        <div id="playlistChoices" class="playlist-choices"></div>
+      </div>
+    </div>
+
+    <div id="shortcutsModal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="form-modal">
+        <button class="modal-close" data-close-modal>×</button>
+        <span class="section-label">KEYBOARD</span>
+        <h2>Shortcuts</h2>
+        <div class="shortcut-list">
+          <div><kbd>Space</kbd><span>Play / Pause</span></div>
+          <div><kbd>←</kbd><span>Seek back 5s</span></div>
+          <div><kbd>→</kbd><span>Seek forward 5s</span></div>
+          <div><kbd>↑</kbd><span>Volume up</span></div>
+          <div><kbd>↓</kbd><span>Volume down</span></div>
+          <div><kbd>S</kbd><span>Shuffle</span></div>
+          <div><kbd>R</kbd><span>Repeat</span></div>
+          <div><kbd>F</kbd><span>Favorite</span></div>
+          <div><kbd>Q</kbd><span>Open queue</span></div>
+          <div><kbd>Esc</kbd><span>Close panel</span></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+  </body>
+</html>

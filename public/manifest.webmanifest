@@ -1,0 +1,32 @@
+{
+  "name": "VOID Music Player",
+  "short_name": "VOID Music",
+  "description": "Stream Indian Bollywood, Punjabi and Haryanvi superhits with lossless audio and zero ads.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07080b",
+  "theme_color": "#07080b",
+  "categories": ["music", "entertainment", "audio"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
