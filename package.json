@@ -1,0 +1,30 @@
+{
+  "name": "void-yt-music",
+  "version": "4.1.0",
+  "description": "VOID Music Player — MongoDB-backed multi-user YouTube music player",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "music",
+    "youtube",
+    "player"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.10.1",
+    "yt-search": "^2.13.1"
+  }
+}
